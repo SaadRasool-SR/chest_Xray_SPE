@@ -1,0 +1,176 @@
+#################################################### Importing libs ###########################################
+from typing import Any
+from matplotlib import transforms
+import pandas
+import mlflow
+import matplotlib.pyplot as plt
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Conv2D , MaxPool2D , Flatten , Dropout , BatchNormalization
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+#from cucim.skimage.transform import AffineTransform, warp
+import seaborn as sns
+import os
+import cv2
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import classification_report
+from sklearn.metrics import ConfusionMatrixDisplay
+import warnings
+import seaborn
+#from cucim.skimage.transform import AffineTransform, warp
+#warnings.filterwarnings("ignore")
+#################################################### Importing Training Data #################################
+train_path = 'train'
+test_path = 'test'
+val_path = 'val'
+
+labels = ['PNEUMONIA', 'NORMAL']
+img_size = 150
+
+def get_data(data_dir):
+    data = []
+    data_labels = []
+    for label in labels: 
+        path = os.path.join(data_dir, label)
+        class_num = labels.index(label)
+        for img in os.listdir(path):
+            try:
+                img_arr = cv2.imread(os.path.join(path, img), cv2.IMREAD_GRAYSCALE)
+                resized_arr = cv2.resize(img_arr, (img_size, img_size)) # Reshaping images to preferred size
+                data.append(np.array(resized_arr))
+                data_labels.append(class_num)
+            except Exception as e:
+                print(e)
+    return np.array(data), np.array(data_labels)
+
+train_images, train_labels =  get_data(train_path)
+test_images, test_labels = get_data(test_path)
+val_images, val_labels = get_data(val_path)
+#################################################### EDA #####################################################
+ 
+
+# 0 = penumonia , 1 = normal
+pneumonia_sample = train_images[np.where(train_labels == 0)[0][:5],:] # get 5 penumonia samples 
+normal_samples = train_images[np.where(train_labels == 1)[0][:5],:] # get 5 normal samples 
+
+np_samples = np.concatenate((pneumonia_sample,normal_samples), axis=0) # Concatenate the samples
+#samples = np.asnumpy(np_samples)
+
+
+f, ax = plt.subplots(2,5, figsize=(30,10))
+for i in range(10):
+    img = np_samples[i]
+    ax[i//5, i%5].imshow(img, cmap='gray')
+    if i<5:
+        ax[i//5, i%5].set_title("Pneumonia")
+    else:
+        ax[i//5, i%5].set_title("Normal")
+    ax[i//5, i%5].axis('off')
+    ax[i//5, i%5].set_aspect('auto')
+plt.show()
+
+
+
+# Visualizing counts of each class with 0 - Pneumonia and 1 - Normal
+normal_count = len(train_labels[train_labels==1])
+pneumonia_count = len(train_labels[train_labels==0])
+x = [1 , 0]
+y = [normal_count, pneumonia_count]
+plt.bar(x, y)
+plt.show()
+#The above plot cleary shows that the dataset is imbalanced.
+
+
+################### Performs image augmentation by translating and rotating image by random amounts ########
+'''
+def augment_image():
+'''
+#################################################### Training Model #########################################
+# Normalizing the data
+
+print(train_images)
+
+train_images = train_images.astype('float32')
+val_images = val_images.astype('float32')
+test_images = test_images.astype('float32')
+train_images /= 255
+val_images /= 255
+test_images /= 255
+
+print(train_images)
+
+train_images = np.array(train_images.reshape(-1,img_size, img_size, 1))
+val_images = np.array(val_images.reshape(-1,img_size, img_size, 1))
+test_images = np.array(test_images.reshape(-1,img_size, img_size, 1))
+train_labels = np.array(train_labels)
+val_labels = np.array(val_labels)
+test_labels = np.array(test_labels)
+
+model = keras.Sequential()
+model.add(Conv2D(32 , (3,3) , strides = 1 , padding = 'same' , activation = 'relu' , input_shape = (img_size, img_size,1)))
+
+model.add(BatchNormalization())
+model.add(MaxPool2D((2,2) , strides = 2 , padding = 'same'))
+
+model.add(Conv2D(64 , (3,3) , strides = 1 , padding = 'same' , activation = 'relu'))
+model.add(Dropout(0.1))
+
+model.add(BatchNormalization())
+model.add(MaxPool2D((2,2) , strides = 2 , padding = 'same'))
+
+model.add(Conv2D(64 , (3,3) , strides = 1 , padding = 'same' , activation = 'relu'))
+
+model.add(BatchNormalization())
+model.add(MaxPool2D((2,2) , strides = 2 , padding = 'same'))
+
+model.add(Conv2D(128 , (3,3) , strides = 1 , padding = 'same' , activation = 'relu'))
+model.add(Dropout(0.2))
+
+model.add(BatchNormalization())
+model.add(MaxPool2D((2,2) , strides = 2 , padding = 'same'))
+
+model.add(Conv2D(256 , (3,3) , strides = 1 , padding = 'same' , activation = 'relu'))
+model.add(Dropout(0.2))
+
+model.add(BatchNormalization())
+model.add(MaxPool2D((2,2) , strides = 2 , padding = 'same'))
+
+model.add(Flatten())
+
+model.add(Dense(units = 128 , activation = 'relu'))
+
+model.add(Dropout(0.2))
+
+model.add(Dense(units = 1 , activation = 'sigmoid'))
+model.compile(optimizer = "rmsprop" , loss = 'binary_crossentropy' , metrics = ['accuracy', keras.metrics.Precision(), keras.metrics.Recall()])
+#model.compile(optimizer = "adam" , loss = 'binary_crossentropy' , metrics = ['accuracy', keras.metrics.Precision(), keras.metrics.Recall()])
+model.summary()
+
+
+learning_rate_reduction = ReduceLROnPlateau(monitor='val_accuracy', patience = 2, verbose=1,factor=0.3, min_lr=0.000001)
+
+history = model.fit(train_images, 
+                    train_labels,
+                    batch_size = 64,
+                    epochs = 10, 
+                    validation_data = (val_images,val_labels),
+                    callbacks = [learning_rate_reduction])
+
+#################################################### Testing Model ###########################################
+
+# Predicting on validation set
+preds = model.predict(val_images)
+preds[preds<0.5] = 0
+preds[preds>=0.5] = 1
+print(classification_report(preds, val_labels))
+
+
+# Predicting on test set
+test_predictions = model.predict(test_images)
+test_predictions[test_predictions<0.5] = 0
+test_predictions[test_predictions>0.5] = 1
+print(classification_report(test_predictions, test_labels))
+
